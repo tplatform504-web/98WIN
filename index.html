@@ -1,0 +1,239 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>MirzaBook — Prediction Demo (Play Money)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body{font-family:Inter, system-ui; background:#0f172a; color:#e6eef8; margin:0;padding:20px}
+    .card{background:#0b1220;padding:18px;border-radius:12px;box-shadow:0 8px 30px rgba(2,6,23,.6); max-width:900px; margin:16px auto}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    button{background:#06b6d4;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+    input,select{padding:8px;border-radius:8px;border:1px solid #203040;background:#071024;color:#fff}
+    .muted{color:#9fb0c9;font-size:0.9em}
+    .admin-badge{background:#ffb86b;color:#000;padding:4px 8px;border-radius:6px;font-weight:700}
+  </style>
+  <!-- Firebase CDN -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+  <div class="card">
+    <h1>MirzaBook — Prediction Demo (Play Money)</h1>
+    <p class="muted">This is a play-money demo — no real payments. Use to prototype UI and flows.</p>
+
+    <div id="auth-area" style="margin-top:12px">
+      <div id="signed-out">
+        <input id="email" placeholder="Email" />
+        <input id="password" placeholder="Password" type="password" />
+        <button id="signup">Sign up</button>
+        <button id="login">Log in</button>
+      </div>
+      <div id="signed-in" style="display:none">
+        <div class="row" style="align-items:center">
+          <div><strong id="displayName"></strong> <span id="adminBadge" class="admin-badge" style="display:none">ADMIN</span></div>
+          <div style="margin-left:auto"><button id="logout">Logout</button></div>
+        </div>
+      </div>
+    </div>
+
+    <hr style="margin:14px 0;border-color:#0b2b3a"/>
+
+    <div id="main-ui" style="display:none">
+      <div class="row">
+        <div style="flex:1">
+          <h3>Wallet: ₹<span id="balance">0</span></h3>
+          <div class="muted">Simulated wallet — use "Add Funds" for testing</div>
+          <div style="margin-top:8px">
+            <input id="addAmt" placeholder="Amount to add (play money)" />
+            <button id="addFunds">Add Funds</button>
+            <button id="requestWithdraw">Request Withdraw</button>
+          </div>
+        </div>
+
+        <div style="flex:1">
+          <h3>Prediction Market</h3>
+          <div class="muted">Pick a colour and stake play-money</div>
+          <div style="margin-top:8px">
+            <select id="colourPick">
+              <option value="red">Red</option>
+              <option value="green">Green</option>
+              <option value="blue">Blue</option>
+            </select>
+            <input id="stake" placeholder="Stake amount" />
+            <button id="placeBet">Place Prediction</button>
+          </div>
+        </div>
+      </div>
+
+      <hr style="margin:14px 0;border-color:#0b2b3a"/>
+
+      <div id="history">
+        <h4>Your Predictions</h4>
+        <div id="predList"></div>
+      </div>
+    </div>
+
+    <div id="admin-ui" style="display:none;margin-top:14px" class="card">
+      <h3>Admin Panel</h3>
+      <div>
+        Market open: <span id="marketState">?</span>
+        <button id="toggleMarket">Toggle Market</button>
+      </div>
+      <div style="margin-top:10px">
+        Pending withdrawals:
+        <div id="withdrawRequests"></div>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+  // --- REPLACE with your own Firebase config ---
+  const firebaseConfig = {
+    apiKey: "FIREBASE_API_KEY",
+    authDomain: "FIREBASE_AUTH_DOMAIN",
+    projectId: "FIREBASE_PROJECT_ID",
+    // ...
+  };
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+
+  // UI refs
+  const signedOut = document.getElementById('signed-out');
+  const signedIn = document.getElementById('signed-in');
+  const mainUI = document.getElementById('main-ui');
+  const adminUI = document.getElementById('admin-ui');
+  const displayName = document.getElementById('displayName');
+  const adminBadge = document.getElementById('adminBadge');
+  const balanceEl = document.getElementById('balance');
+  const predList = document.getElementById('predList');
+  const withdrawRequests = document.getElementById('withdrawRequests');
+  const marketState = document.getElementById('marketState');
+
+  // Auth handlers
+  document.getElementById('signup').onclick = async () => {
+    const email = document.getElementById('email').value;
+    const pwd = document.getElementById('password').value;
+    const userCred = await auth.createUserWithEmailAndPassword(email, pwd);
+    // create user doc
+    await db.collection('users').doc(userCred.user.uid).set({
+      email, wallet_balance: 100, isPremium: false, isAdmin: false
+    });
+  }
+  document.getElementById('login').onclick = async () => {
+    const email = document.getElementById('email').value;
+    const pwd = document.getElementById('password').value;
+    await auth.signInWithEmailAndPassword(email, pwd);
+  }
+  document.getElementById('logout').onclick = () => auth.signOut();
+
+  auth.onAuthStateChanged(async user => {
+    if(!user){ signedOut.style.display='block'; signedIn.style.display='none'; mainUI.style.display='none'; adminUI.style.display='none'; return; }
+    signedOut.style.display='none'; signedIn.style.display='block'; mainUI.style.display='block';
+    const doc = await db.collection('users').doc(user.uid).get();
+    const data = doc.data() || {};
+    displayName.textContent = data.email || user.email;
+    balanceEl.textContent = (data.wallet_balance||0).toFixed(2);
+    adminBadge.style.display = data.isAdmin? 'inline-block':'none';
+    if(data.isAdmin) adminUI.style.display='block';
+
+    // listen user's predictions
+    db.collection('predictions').where('userId','==',user.uid).orderBy('timestamp','desc')
+      .onSnapshot(snap=>{
+        predList.innerHTML='';
+        snap.forEach(d=>{
+          const p = d.data();
+          const el = document.createElement('div');
+          el.textContent = `${new Date(p.timestamp?.toMillis?.()||p.timestamp).toLocaleString()} — ${p.choice} — stake ${p.amount} — result: ${p.result||'pending'}`;
+          predList.appendChild(el);
+        });
+      });
+  });
+
+  // Add funds (simulated)
+  document.getElementById('addFunds').onclick = async () => {
+    const amt = parseFloat(document.getElementById('addAmt').value||0);
+    const u = auth.currentUser; if(!u) return alert('Login first');
+    if(amt<=0) return alert('Enter amount');
+    const userRef = db.collection('users').doc(u.uid);
+    await db.runTransaction(async tx=>{
+      const snap = await tx.get(userRef);
+      const bal = (snap.data().wallet_balance||0) + amt;
+      tx.update(userRef,{wallet_balance: bal});
+      tx.set(db.collection('transactions').doc(), {userId:u.uid, type:'deposit', amount:amt, status:'completed', ts:firebase.firestore.FieldValue.serverTimestamp()});
+    });
+    alert('Added play funds');
+  };
+
+  // Place prediction
+  document.getElementById('placeBet').onclick = async () => {
+    const choice = document.getElementById('colourPick').value;
+    const stake = parseFloat(document.getElementById('stake').value||0);
+    const u = auth.currentUser; if(!u) return alert('Login first');
+    if(stake<=0) return alert('Enter stake');
+    const userRef = db.collection('users').doc(u.uid);
+    await db.runTransaction(async tx=>{
+      const snap = await tx.get(userRef);
+      const bal = snap.data().wallet_balance||0;
+      if(bal < stake) throw 'Insufficient balance';
+      tx.update(userRef,{wallet_balance: bal - stake});
+      const predRef = db.collection('predictions').doc();
+      tx.set(predRef, {userId:u.uid, choice, amount: stake, timestamp: firebase.firestore.FieldValue.serverTimestamp(), result: null});
+      tx.set(db.collection('transactions').doc(), {userId:u.uid, type:'bet', amount:stake, status:'placed', ts:firebase.firestore.FieldValue.serverTimestamp()});
+    }).then(()=>alert('Prediction placed (play-money)')).catch(e=>alert('Error: '+e));
+  };
+
+  // Admin: toggle market (simple flag)
+  document.getElementById('toggleMarket').onclick = async () => {
+    const sRef = db.collection('settings').doc('market');
+    const doc = await sRef.get();
+    const open = !(doc.exists && doc.data().marketOpen);
+    await sRef.set({marketOpen: open});
+  };
+
+  // show market state
+  db.collection('settings').doc('market').onSnapshot(doc=>{
+    marketState.textContent = (doc.exists && doc.data().marketOpen) ? 'OPEN' : 'CLOSED';
+  });
+
+  // Admin: process withdraw requests (for demo they just set status)
+  // For demonstration, withdrawals are created by user as 'pending' records in transactions
+  document.getElementById('requestWithdraw').onclick = async () => {
+    const u = auth.currentUser; if(!u) return alert('Login first');
+    const amt = prompt('Enter amount to withdraw (simulated):');
+    const a = parseFloat(amt||0); if(!a||a<=0) return;
+    await db.collection('transactions').add({userId:u.uid, type:'withdraw', amount:a, status:'pending', ts:firebase.firestore.FieldValue.serverTimestamp()});
+    alert('Withdrawal request created (admin will mark it processed in demo)');
+  };
+
+  // admin listen to pending withdraws
+  db.collection('transactions').where('type','==','withdraw').where('status','==','pending')
+    .onSnapshot(snap=>{
+      withdrawRequests.innerHTML='';
+      snap.forEach(doc=>{
+        const d = doc.data();
+        const el = document.createElement('div');
+        el.style.marginBottom='8px';
+        el.textContent = `${d.userId} — ₹${d.amount} — ${new Date(d.ts?.toMillis?.()||d.ts).toLocaleString()}`;
+        const btn = document.createElement('button');
+        btn.textContent='Mark Paid (demo)';
+        btn.onclick = async ()=> {
+          // mark completed and deduct (in demo withdraw does nothing to external)
+          await db.collection('transactions').doc(doc.id).update({status:'completed', processedAt: firebase.firestore.FieldValue.serverTimestamp()});
+          // in demo we simply do nothing else; in real system admin would trigger actual payout
+          alert('Marked completed (demo)');
+        };
+        el.appendChild(btn);
+        withdrawRequests.appendChild(el);
+      });
+    });
+
+  // Basic security: ensure only admins see admin UI (we rely on user doc.isAdmin)
+  // Note: This is for demo only. Stronger server-side checks are required before real deployment.
+
+</script>
+</body>
+</html>
